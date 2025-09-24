@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Animated LST Time-lapse (2000–2025) — NASA GIBS + Country Alerts</title>
+
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- chroma.js for color scale rendering (legend) -->
+<script src="https://unpkg.com/chroma-js@2.4.2/chroma.min.js"></script>
+
+<!-- turf.js for spatial ops (point-in-polygon) -->
+<script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+
+<style>
+html,body{height:100%;margin:0;background:#071024;color:#e6f2ff;font-family:Inter,Segoe UI,Arial,sans-serif}
+#map { height:100vh; border-radius:10px; overflow:hidden; box-shadow:0 8px 30px rgba(2,6,23,0.6); border:1px solid rgba(255,255,255,0.03); }
+.year-overlay { position:absolute; top:14px; right:14px; z-index:999; background:rgba(0,0,0,0.55); color:white; padding:8px 12px; font-size:22px; border-radius:8px; font-weight:700; pointer-events:none; }
+.country-tooltip { background: rgba(0,0,0,0.65); color: #fff; border-radius: 4px; padding: 2px 6px; font-size:12px; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="year-overlay" id="yearOverlay">2000</div>
+
+<script>
+/* CONFIG */
+const START_YEAR = 2000, END_YEAR = 2025;
+const YEARS = Array.from({length: END_YEAR - START_YEAR + 1}, (_, i) => START_YEAR + i);
+const DEFAULT_YEAR = 2000;
+const LST_OPACITY = 0.65;
+
+/* Map setup */
+const map = L.map('map', { zoomControl:true }).setView([20,0], 2); // full-world view
+
+/* Satellite basemap (NASA VIIRS True Color) */
+const satellite = L.tileLayer(
+  "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_SNPP_CorrectedReflectance_TrueColor/default/2023-07-01/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg",
+  { tileSize:256, minZoom:1, maxZoom:9, attribution:"NASA EOSDIS GIBS" }
+).addTo(map);
+
+/* LST overlay */
+let currentYear = DEFAULT_YEAR;
+let lstLayer = L.tileLayer(
+  `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_Land_Surface_Temp_Day/default/${currentYear}-07-01/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png`,
+  { tileSize:256, minZoom:1, maxZoom:8, opacity:LST_OPACITY, attribution:"NASA EOSDIS GIBS" }
+).addTo(map);
+
+/* Countries boundary (smooth, thin, dark) */
+let countriesGeo = null;
+fetch('https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json')
+.then(r=>r.json())
+.then(data=>{
+  countriesGeo = data;
+  L.geoJSON(data,{
+    style:()=>({color:'#000',weight:0.6,fillOpacity:0}),
+    onEachFeature:(f,layer)=>{
+      const name = f.properties.name || f.properties.ADMIN || 'Unknown';
+      layer.bindTooltip(name,{direction:'center',className:'country-tooltip',permanent:false,opacity:0.85});
+    }
+  }).addTo(map);
+});
+
+/* Country pins (USA, India, Russia) */
+const countryPins = [
+  {name:"USA", coords:[37.1,-95.7], color:"#e53935"},
+  {name:"India", coords:[21.0,78.0], color:"#e53935"},
+  {name:"Russia", coords:[61.5,105.3], color:"#e53935"}
+];
+
+/* Smooth pulsating pin */
+function makePin(color="#e53935"){
+  return L.divIcon({
+    className:"",
+    html:`
+      <div style="
+        position:relative;
+        width:20px; height:20px;
+        border-radius:50%;
+        background:${color};
+        border:2px solid white;
+        box-shadow:0 0 8px rgba(0,0,0,0.5);
+        animation: pulse 1.5s infinite;
+        cursor:pointer;
+      ">
+      </div>
+      <style>
+        @keyframes pulse {
+          0% { transform: scale(1); box-shadow:0 0 8px rgba(0,0,0,0.5); }
+          50% { transform: scale(1.5); box-shadow:0 0 18px ${color}AA; }
+          100% { transform: scale(1); box-shadow:0 0 8px rgba(0,0,0,0.5); }
+        }
+      </style>
+    `,
+    iconSize:[24,24],
+    iconAnchor:[12,12],
+    popupAnchor:[0,-12]
+  });
+}
+
+/* Get topic from URL */
+const urlParams = new URLSearchParams(window.location.search);
+const topic = urlParams.get('topic') || 'default';
+
+/* Video URLs per topic per country */
+/* Video URLs per topic per country */
+const topicVideos = {
+  // Add the Aerosol topic
+  aerosol: {
+    USA: '<iframe width="100%" height="100%" src="https://www.youtube.com/embed/hJ0HVDMlJyo" title="AEROSOL USA" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>',
+    India: '<iframe width="100%" height="100%" src="https://www.youtube.com/embed/x0RIjvbRt_k" title="Aerosol India" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>',
+    Russia: '<iframe width="100%" height="100%" src="https://www.youtube.com/embed/D71EFftX_vQ" title="Aerosol Russia" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>'
+  },
+  // Add the Climate Story topic
+/*  climateStory: {
+    USA: '<iframe width="560" height="315" src="https://www.youtube.com/embed/9yKz6KUD43k?si=_p8m9qaLJfPGfwm3" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>',
+    India: '<iframe width="1228" height="480" src="https://www.youtube.com/embed/KUkquV2bpgc" title="Climate Story India" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>',
+    Russia: '<iframe width="1228" height="480" src="https://www.youtube.com/embed/XSd93T-HVwQ" title="Climate Story Russia" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>'
+  },
+  // Add the Temprature topic
+  temperature: {
+    USA: '<iframe width="1228" height="480" src="https://www.youtube.com/embed/5-hfn0zkcrg" title="Temprature USA" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>',
+    India: '<iframe width="1228" height="480" src="https://www.youtube.com/embed/9gnFsjJB9eA" title="Temprature India" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>',
+    Russia: '<iframe width="1228" height="480" src="https://www.youtube.com/embed/lqAaT8bB4ew" title="Temprature Russia" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>'
+  },
+  // Add the Vegetation topic
+  vegetation: {
+    USA: '<iframe width="1228" height="480" src="https://www.youtube.com/embed/k8mrkekEstU" title="Vegetation USA" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>',
+    India: '<iframe width="1228" height="480" src="https://www.youtube.com/embed/mDU9ZcHHF3k" title="Vegetation India" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>',
+    Russia: '<iframe width="1228" height="480" src="https://www.youtube.com/embed/poe2ReoEw7I" title="Vegetation Russia" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>'
+  },*/
+  // Keep the 'default' or remove it if you don't need it
+  default: {
+      USA: '<iframe width="100%" height="100%" src="https://www.youtube.com/embed/hJ0HVDMlJyo" title="AEROSOL USA" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>',
+    India: '<iframe width="100%" height="100%" src="https://www.youtube.com/embed/x0RIjvbRt_k" title="Aerosol India" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>',
+    Russia: '<iframe width="100%" height="100%" src="https://www.youtube.com/embed/D71EFftX_vQ" title="Aerosol Russia" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>'
+  }
+};
+
+/* Add interactive pins with video popups */
+countryPins.forEach(c => {
+  L.marker(c.coords, {icon: makePin(c.color)})
+    .addTo(map)
+    .bindPopup(`<b>${c.name}</b><br>Click to watch animation`) // This is the *initial* popup content
+    .on('click', () => { // This is the function that opens the *video* popup
+       const videoUrl = (topicVideos[topic] && topicVideos[topic][c.name]) || topicVideos['default'][c.name];
+       if (videoUrl) {
+         showVideoPopup(videoUrl, c.name);
+       }
+    });
+});
+/* Function to show video popup */
+function showVideoPopup(url, countryName){
+  const popupContent = `
+    <div style="width:320px;height:200px">
+      <h4>${countryName} - ${topic}</h4>
+      ${url}  </div>
+  `;
+  L.popup({ maxWidth: 340 })
+   .setLatLng(map.getCenter())
+   .setContent(popupContent)
+   .openOn(map);
+}
+/* Year display and LST update */
+function setYear(y){
+  currentYear = y;
+  document.getElementById('yearOverlay').textContent = y;
+  map.removeLayer(lstLayer);
+  lstLayer = L.tileLayer(
+    `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_Land_Surface_Temp_Day/default/${y}-07-01/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png`,
+    {tileSize:256, minZoom:1,maxZoom:8,opacity:LST_OPACITY,attribution:"NASA EOSDIS GIBS"}
+  ).addTo(map);
+}
+
+/* Animate through years every 1s */
+let yearIndex = 0;
+setInterval(()=>{
+  setYear(YEARS[yearIndex]);
+  yearIndex = (yearIndex+1) % YEARS.length;
+},1000);
+
+</script>
+</body>
+</html>
